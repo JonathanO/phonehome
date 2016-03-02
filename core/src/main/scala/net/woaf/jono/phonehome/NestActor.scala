@@ -5,6 +5,32 @@ import com.firebase.client.{FirebaseError, AuthData, DataSnapshot, ValueEventLis
 import com.firebase.client.Firebase.{ AuthResultHandler, CompletionListener }
 import com.typesafe.scalalogging.LazyLogging
 import scala.collection.mutable
+import net.woaf.jono.phonehome.EnumerationMacros.sealedInstancesOf
+
+object AwayStates {
+
+  sealed abstract class AwayState(name: String) extends Ordered[AwayState] {
+    override def toString: String = name
+
+    override def compare(that: AwayState): Int = this.toString.compareTo(that.toString)
+  }
+
+  case object UNKNOWN extends AwayState("n/a")
+  case object HOME extends AwayState("home")
+  case object AWAY extends AwayState("away")
+  case object AUTO_AWAY extends AwayState("auto-away")
+
+
+  val awayStates: Set[AwayState] = sealedInstancesOf[AwayState]
+  private val byName: Map[String, AwayState] = awayStates.map(s => s.toString -> s).toMap
+
+  def apply(name: String): AwayState = byName.getOrElse(name, UNKNOWN)
+
+}
+
+final case class SetAwayState(state: AwayStates.AwayState)
+
+final case class StructureUpdate(name: String, state: AwayStates.AwayState)
 
 /**
  * helper class for initializing a NestActor with appropriate args
@@ -25,7 +51,7 @@ class NestActor(nestToken: String, firebaseURL: String) extends Actor with LazyL
   private val fb = new Firebase(firebaseURL)
 
   // maintain maps of the current state of things so we can trigger on edge changes
-  private val structureStates = mutable.HashMap[String, String]()
+  private val structureStates = mutable.HashMap[String, AwayStates.AwayState]()
   private val structMap = mutable.HashMap[String, String]()
 
   // authenticate with our current credentials
@@ -65,7 +91,7 @@ class NestActor(nestToken: String, firebaseURL: String) extends Actor with LazyL
           val structName = struct.child("name").getValue.toString
           structMap += (struct.getName -> structName)
           // now compare states and send an update if they changed
-          val structState = struct.child("away").getValue.toString
+          val structState = AwayStates(struct.child("away").getValue.toString)
           val oldState = structureStates.getOrElse(structName, "n/a")
           structureStates += (structName -> structState)
           if (oldState != structState) {
@@ -83,15 +109,15 @@ class NestActor(nestToken: String, firebaseURL: String) extends Actor with LazyL
   }
 
   override def receive: Actor.Receive = {
-    case a: AwayState =>
+    case a: SetAwayState =>
       structMap.keys.toList match {
         case structId :: xs =>
           val structName = structMap(structId)
           val awayRef = fb.child("structures").child(structId).child("away")
-          val newState = if (a.away) "away" else "home"
+          val newState = a.state
           if (structureStates(structName) != newState) {
             logger.info(s"setting away state to $newState on $structName ($structId)")
-            awayRef.setValue(newState, new CompletionListener {
+            awayRef.setValue(newState.toString, new CompletionListener {
               override def onComplete(err: FirebaseError, fb: Firebase) = {
                 if (err != null) { // scalastyle:ignore
                   logger.error(s"completed with err=${err.getCode}-${err.getMessage}, fb=$fb")

@@ -3,7 +3,7 @@ package net.woaf.jono.phonehome
 import akka.actor.{ Props, ActorSystem }
 import com.typesafe.scalalogging.StrictLogging
 
-case class Config(firebaseUrl: String = "", nestToken: String = "", hosts: Seq[String] = Seq(), interface: String = "")
+final case class Config(firebaseUrl: String = "", nestToken: String = "", hosts: Seq[String] = Seq(), interface: String = "")
 
 object Main extends App with StrictLogging {
 
